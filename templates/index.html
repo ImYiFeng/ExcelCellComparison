@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel单元格比较工具</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Excel单元格内容比较工具</h1>
+
+        <form id="compareForm">
+            <div class="form-group">
+                <label>第一步：上传Excel文件</label>
+                <input type="file" id="excelFile" accept=".xls,.xlsx" required>
+            </div>
+
+            <div class="form-group">
+                <label>第二步：选择工作表</label>
+                <div id="sheetContainer" class="radio-group"></div>
+            </div>
+
+            <div class="input-group">
+                <div class="form-group">
+                    <label>单元格1 (例: A1)</label>
+                    <input type="text" id="cell1" required>
+                </div>
+
+                <div class="form-group">
+                    <label>单元格2 (例: B2)</label>
+                    <input type="text" id="cell2" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>分隔符（可选，默认为换行）</label>
+                <input type="text" id="delimiters"
+                       placeholder="例如：, ; |">
+            </div>
+
+            <button type="button" onclick="handleCompare()">开始比较</button>
+            <div id="errorMessage" class="error hidden"></div>
+        </form>
+    </div>
+
+    <script>
+        let currentFile = null;
+
+        // 文件选择事件处理
+        document.getElementById('excelFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            currentFile = file;
+
+            try {
+                // 获取工作表列表
+                const formData = new FormData();
+                formData.append('excel_file', file);
+
+                const response = await fetch('/get-sheets', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+
+                // 动态生成工作表单选按钮
+                const container = document.getElementById('sheetContainer');
+                container.innerHTML = data.sheets.map(sheet => `
+                    <div class="radio-item">
+                        <input type="radio" name="sheet" id="${sheet}" value="${sheet}"
+                               ${data.sheets[0] === sheet ? 'checked' : ''}>
+                        <label for="${sheet}">
+                            <span class="radio-button"></span>
+                            <span class="radio-label">${sheet}</span>
+                        </label>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                showError('获取工作表列表失败，请检查文件格式');
+            }
+        });
+
+        // 比较处理
+        async function handleCompare() {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = '';
+
+            if (!currentFile) {
+                showError('请先上传Excel文件');
+                return;
+            }
+
+            const formValues = {
+                sheet: document.querySelector('input[name="sheet"]:checked')?.value,
+                cell1: document.getElementById('cell1').value.trim(),
+                cell2: document.getElementById('cell2').value.trim(),
+                delimiters: document.getElementById('delimiters').value.trim()
+            };
+
+            // 验证输入
+            if (!formValues.sheet) {
+                showError('请选择工作表');
+                return;
+            }
+            if (!formValues.cell1 || !formValues.cell2) {
+                showError('请填写两个单元格引用');
+                return;
+            }
+
+            // 构建表单数据
+            const formData = new FormData();
+            formData.append('excel_file', currentFile);
+            formData.append('sheet_name', formValues.sheet);
+            formData.append('cell1', formValues.cell1);
+            formData.append('cell2', formValues.cell2);
+            formData.append('delimiters', formValues.delimiters);
+
+            try {
+                const response = await fetch('/compare', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error);
+                }
+
+                // 处理文件下载
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'comparison_result.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+            } catch (error) {
+                showError(error.message || '处理失败，请检查输入格式');
+            }
+        }
+
+        // 错误显示函数
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                errorDiv.classList.remove('show');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
